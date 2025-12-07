@@ -23,58 +23,74 @@ template<typename T> concept stringlike = requires (T t) {
 };
 
 // pushing funcs
-void tpush(lua_State* lua, const std::integral auto& value) {
+void lpush(lua_State* lua, const std::integral auto& value) {
 	lua_pushinteger(lua, (lua_Integer)value);
 }
-void tpush(lua_State* lua, const std::floating_point auto& value) {
+void lpush(lua_State* lua, const std::floating_point auto& value) {
 	lua_pushnumber(lua, (lua_Number)value);
 }
-void tpush(lua_State* lua, const char* value) {
+void lpush(lua_State* lua, const char* value) {
 	lua_pushstring(lua, value);
 }
-void tpush(lua_State* lua, const stringlike auto& value) {
+void lpush(lua_State* lua, const stringlike auto& value) {
 	lua_pushlstring(lua, value.data(), value.size());
 }
-void tpush(lua_State* lua, void* value) {
+void lpush(lua_State* lua, void* value) {
 	lua_pushlightuserdata(lua, value);
 }
 
 // popping funcs
-template<std::same_as<bool> T> T tpop(lua_State* lua, int n) {
+template<std::same_as<bool> T> T lto(lua_State* lua, int n) {
 	return T { (bool)lua_toboolean(lua, n) };
 }
-template<std::integral T> T tpop(lua_State* lua, int n) {
+template<std::integral T> T lto(lua_State* lua, int n) {
 	return (T)lua_tointeger(lua, n);
 }
-template<std::floating_point T> T tpop(lua_State* lua, int n) {
+template<std::floating_point T> T lto(lua_State* lua, int n) {
 	return (T)lua_tonumber(lua, n);
 }
-template<std::same_as<const char*> T> T tpop(lua_State* lua, int n) {
+template<std::same_as<const char*> T> T lto(lua_State* lua, int n) {
 	return T { lua_tostring(lua, n) };
 }
-template<std::constructible_from<const char*, int> T> T tpop(lua_State* lua, int n) {
+template<std::constructible_from<const char*, int> T> T lto(lua_State* lua, int n) {
 	auto size = 0ul;
 	const auto* str = lua_tolstring(lua, n, &size);
 	return T { str, size };
 }
-template<std::constructible_from<const void*> T> T tpop(lua_State* lua, int n) {
+template<std::constructible_from<const void*> T> T lto(lua_State* lua, int n) {
 	return T { lua_topointer(lua, n) };
 }
 // {cfunction, userdata, thread}
 
-template<int N, typename ... Ts> void tpop(lua_State* lua, std::tuple<Ts...>& values) {
-	if constexpr(N < sizeof...(Ts)) {
-		constexpr auto M = sizeof...(Ts) - (N+1);
-		std::get<M>(values) = tpop<std::tuple_element_t<M, std::tuple<Ts...>>>(lua, -(N+1));
-		tpop<N+1, Ts...>(lua, values);
+template<int N, typename Tuple> void lto(lua_State* lua, Tuple& values) {
+	if constexpr(N < std::tuple_size_v<Tuple>) {
+		constexpr auto M = std::tuple_size_v<Tuple> - (N+1);
+		std::get<M>(values) = lto<std::tuple_element_t<M, Tuple>>(lua, -(N+1));
+		lto<N+1, Tuple>(lua, values);
 	}
 }
-template<typename... Ts> std::tuple<Ts...> tpop(lua_State* lua) {
+template<typename Tuple> Tuple lb_args(lua_State* lua) {
+	auto retval = Tuple{};
+	lto<0, Tuple>(lua, retval);
+	return retval;
+}
+template<typename... Ts> std::tuple<Ts...> lb_rets(lua_State* lua) {
 	auto retval = std::tuple<Ts...>{};
-	tpop<0, Ts...>(lua, retval);
+	lto<0, decltype(retval)>(lua, retval);
 	lua_pop(lua, (int)sizeof...(Ts));
 	return retval;
 }
+
+
+
+template<typename F> struct arg_types {};
+template<typename R, typename... A> struct arg_types<R(A...)> {
+	using tuple = std::tuple<A...>;
+};
+#define lbind(lua, func) lua_register(lua, #func, [](lua_State* lua) -> int {\
+	lpush(lua, std::apply(func, lb_args<arg_types<decltype(func)>::tuple>(lua)));\
+	return 1;\
+});
 
 const char* error_str(int res);
 
@@ -106,7 +122,7 @@ public:
 		}
 		
 		// push arguments ...
-		(tpush(lua, args), ...);
+		(lpush(lua, args), ...);
 
 		if (const auto res = lua_pcall(lua, nargs, nret, errpos); res != LUA_OK) {
 			// an error occurred; log it and pop it; error handler already added traceback
@@ -116,8 +132,10 @@ public:
 		}
 		
 		// pop returns ...
-		return tpop<return_types...>(lua);
+		return lb_rets<return_types...>(lua);
 	}
+
+	inline lua_State* get_lua() { return lua; }
 
 private:
 	lua_State* lua;
@@ -139,7 +157,6 @@ static int error_handler(lua_State* lua) {
 	return 1;
 }
 static int lua_exception_wrapper(lua_State* lua, lua_CFunction f) {
-	// log<false>("FUNCWRAPPER");
 	try {return f(lua);}
 	catch (const char* c) {lua_pushstring(lua, ("c++ error"s + c).c_str());}
 	catch (std::exception& e) {lua_pushstring(lua, ("c++ exception"s + e.what()).c_str());}
