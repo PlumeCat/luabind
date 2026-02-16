@@ -23,7 +23,7 @@ end
 
 -- import { "../../glfw/include/GLFW/glfw3" }
 -- import { "glfw3" }
-local glfw = ffi.load("../../../glfw/glfw-3.4.bin.MACOS/lib-arm64/libglfw.3.dylib")
+-- local glfw = ffi.load("../../../glfw/glfw-3.4.bin.MACOS/lib-arm64/libglfw.3.dylib")
 
 function main(...)
 	
