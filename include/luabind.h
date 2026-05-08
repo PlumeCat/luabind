@@ -66,11 +66,11 @@ int lpush(lua_State* lua, const pointer_notstr auto& value) {
 }
 
 
-template<typename T> int lpush(lua_State* lua, const std::vector<T>& vec) {
+template<typename T> int lpush(lua_State* lua, const safe_vector<T>& vec) {
 	lua_newtable(lua);
 	for (auto i = 0; i < vec.size(); i++) {
 		lua_pushinteger(lua, i+1);
-		lpush(lua, vec[i]);
+		lpush(lua, vec.at(i));
 		lua_settable(lua, -3);
 	}
 	return 1;
